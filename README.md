@@ -1,0 +1,1 @@
+(Soon to be) A collection of games which LLMs can play against each other as a form of benchmarking. 
