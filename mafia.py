@@ -14,12 +14,14 @@ from anthropic import Anthropic
 
 load_dotenv()
 
-CHAT_FILE = os.getenv("MAFIA_CHAT_FILE") or "mafia_chat.txt"
+CHAT_FILE = os.getenv("MAFIA_CHAT_FILE") or "mafia_chat.json"
+tokens = {x: os.getenv(f'{x}_API_KEY') for x in ['OPENAI', 'XAI', 'DEEPSEEK', 'ANTROPIC', 'MISTRAL', 'GOOGLE', 'ALIBABA']}
 
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-# xai_client = OpenAI(api_key=os.getenv("XAI_API_KEY"), base_url='https://api.x.ai/v1')
-# deepseek_client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url='https://api.deepseek.com')
-# antropic_client = Anthropic(api_key=os.getenv("ANTROPIC_API_KEY"))
+openai_client = OpenAI(api_key=tokens['OPENAI']) if tokens['OPENAI'] else None
+xai_client = OpenAI(api_key=tokens['XAI']) if tokens['XAI'] else None
+deepseek_client = OpenAI(api_key=tokens['DEEPSEEK']) if tokens['DEEPSEEK'] else None
+antropic_client = Anthropic(api_key=tokens['ANTROPIC']) if tokens['ANTROPIC'] else None
+mistral_client = OpenAI(api_key=tokens['MISTRAL'], base_url="https://api.mistral.ai/v1") if tokens['MISTRAL'] else None
 
 def openai_sdk_chat_completion(client, model):
     def get_openai_completion(chat):
@@ -38,13 +40,14 @@ def antropic_sdk_chat_completion(model):
     return get_antropic_completion
 
 llms = {
-    # "xai-grok-2-1212": openai_sdk_chat_completion(xai_client, "grok-2-1212"),
     "openai-gpt-4o": openai_sdk_chat_completion(openai_client, "gpt-4o"),
     # "openai-gpt-4o-mini": openai_sdk_chat_completion(openai_client, "gpt-4o-mini"), # this model does not understand who it is playing as
-    # "deepseek-deepseek-chat": openai_sdk_chat_completion(deepseek_client, "deepseek-chat"),
-    # "deepseek-deepseek-reasoner": openai_sdk_chat_completion(deepseek_client, "deepseek-reasoner"),
-    # "anthropic-claude-3-5-sonnet-20241022": antropic_sdk_chat_completion("claude-3-5-sonnet-20241022"),
+    "xai-grok-2-1212": openai_sdk_chat_completion(xai_client, "grok-2-1212") if xai_client else None,
+    "deepseek-deepseek-chat": openai_sdk_chat_completion(deepseek_client, "deepseek-chat") if deepseek_client else None,
+    "deepseek-deepseek-reasoner": openai_sdk_chat_completion(deepseek_client, "deepseek-reasoner") if deepseek_client else None,
+    "anthropic-claude-3-5-sonnet-20241022": antropic_sdk_chat_completion("claude-3-5-sonnet-20241022") if antropic_client else None,
 }
+llms = {k: v for k, v in llms.items() if v}
 
 def format_chat(chat, players):
     chat_str = ''
@@ -70,30 +73,29 @@ def save_game(chat, players, filename):
 
 def get_completion(player_name, players, chat):
     """Get a completion from the LLM for the given player."""
-    # Don't get completions for dead players
-    if not players[player_name]["is_alive"]:
-        return None
     visible_messages = [msg for msg in chat if player_name in msg["visible_to"]]
     formatted_messages = []
     for msg in visible_messages:
         if msg["author"] == 'Moderator':
             formatted_messages.append({
-                "role": "system", 
+                "role": "system",
                 "content": msg["content"],
-                "name": msg["author"]
+                "name": "Moderator"
             })
         elif msg["author"] == player_name:
             formatted_messages.append({
-                "role": "assistant", 
-                "content": f"{msg['content']}",
-                "name": f"{msg['author']}-You"
+                "role": "assistant",
+                "content": msg["content"],
+                "name": f"{player_name}"
             })
         else:
-            formatted_messages.append({
-                "role": "user", 
-                "content": f"{msg['content']}",
-                "name": msg["author"]
-            })
+            if formatted_messages[-1]["role"] == "user":
+                formatted_messages[-1]["content"] += f"\n{msg['author']}: {msg['content']}"
+            else:
+                formatted_messages.append({
+                    "role": "user",
+                    "content": f"{msg['author']} {msg['content']}",
+                })
     
     model = players[player_name]["model"]
     try:
@@ -105,9 +107,8 @@ def get_completion(player_name, players, chat):
     content = completion.choices[0].message.content
     # remove leading `Name: ` from the completion
     for n in players.keys():
-        pattern = re.compile(rf"^{n}(-You)?: ")
+        pattern = re.compile(rf"^{n}(-You)?:? ")
         content = pattern.sub('', content)
-    # pdb.set_trace()
     return content
 
 def process_votes(chat, players, voters, visible_to):
@@ -116,16 +117,15 @@ def process_votes(chat, players, voters, visible_to):
     alive_voters = [v for v in voters if players[v]["is_alive"]]
     for voter in random.sample(alive_voters, len(alive_voters)):
         response = get_completion(voter, players, chat)
-        if response is None:  # Skip if player is dead
+        if response is None:
             continue
         append_message(chat, players, voter, visible_to, response)
         for candidate in random.sample(list(players.keys()), len(players)):
             if candidate in response:
                 votes[candidate] = votes.get(candidate, 0) + 1
                 append_message(chat, players, 'Moderator', visible_to, 
-                    f"{voter} has voted to kill {candidate}."
+                    f"{voter} has voted to kill {candidate}. The current tally is: {json.dumps(votes, indent=2)}"
                 )
-                print(f"Votes: {json.dumps(votes, indent=2)}")
                 break
     # Filter votes to only include alive players
     votes = {p: v for p, v in votes.items() if p in players and players[p]["is_alive"]}
@@ -133,13 +133,12 @@ def process_votes(chat, players, voters, visible_to):
 
 def append_message(chat, players, author, visible_to, content, author_alive=True):
     """Append a message to chat, print it, and optionally save the game state."""
-    character = "moderator" if author == "Moderator" else players[author]["character"]
     message = {
         "author": author,
         "author_alive": author_alive,
         "visible_to": visible_to,
         "content": content,
-        "character": character
+        "character": "moderator" if author == "Moderator" else players[author]["character"]
     }
     chat.append(message)
     print_last_message(chat, players)
@@ -189,7 +188,33 @@ def play():
 
     chat = []
     append_message(chat, players, 'Moderator', selected_names,
-        f"Welcome to the game of Mafia! In this game there are two teams: the Mafia and the Villagers. The Mafia's goal is to kill all the Villagers, while the Villagers' goal is to kill all the Mafiosi. The game is played in rounds. Each round consists of two phases: the Night phase and the Day phase. During the Night phase, only the Mafiosi are awake. They will choose one player to kill. All Mafiosi will see each other's choices, but the Villagers are asleep and do now know who voted for whom. The player with the most votes will be killed. During the Day phase, all players are awake. The players will discover who was killed during the night and will openly discuss the situation. After the discussion, all players will vote on which player to lynch. Every player can see the votes of all other players. WHEN ASKED TO VOTE FOR A PLAYER PLEASE RESPOND WITH THE NAME ONLY. The player with the most votes will be lynched. Living players can only hear other living players. Dead players can head both living and other dead players. The game ends when either all the Mafiosi are eliminated or the Mafiosi outnumber the Villagers. In this specific game there are {len(players)} players including yourself. {num_mafiosi} of which are Mafiosi. Let's first start with an introduction round, please say your name and a few words about yourself. Then each player will receive their character and we will start the game. Good luck!"
+        f"""Welcome to a multi-player game of Mafia! You are one of {len(players)} players, and you will be interacting with other AI players in this conversation. Each player has their own distinct personality and role.
+
+GAME RULES:
+- There are two teams: {num_mafiosi} Mafiosi and {len(players) - num_mafiosi} Villagers
+- Mafia's goal: Eliminate all Villagers
+- Villagers' goal: Find and eliminate all Mafiosi
+
+GAME PHASES:
+1. Night Phase:
+   - Only Mafiosi are awake and can communicate
+   - Mafiosi vote to kill one player
+   - Villagers cannot see this discussion
+
+2. Day Phase:
+   - All surviving players discuss openly
+   - Everyone votes to eliminate one suspect
+   - All votes are public
+
+IMPORTANT RULES:
+- You can only see messages from living players
+- When voting, mention ONLY the name of your chosen player
+- Respond in character and interact with others naturally
+- Pay attention to who is alive and dead
+
+You will soon receive your specific role and team assignment. First, let's have an introduction round - please share a brief introduction about yourself when asked.
+
+Remember: You are a player, not the moderator. Good luck!"""
     )
 
     # Get introductions
@@ -224,9 +249,10 @@ def play():
         )
 
         # Mafia discussion
-        for mafioso in random.choices(mafiosi, k=len(mafiosi) * 2):
-            response = get_completion(mafioso, players, chat)
-            append_message(chat, players, mafioso, mafiosi, response)
+        for _ in range(2):
+            for mafioso in random.choices(mafiosi, k=len(mafiosi)):
+                response = get_completion(mafioso, players, chat)
+                append_message(chat, players, mafioso, mafiosi, response)
 
         append_message(chat, players, 'Moderator', mafiosi,
             "It is time for the Mafiosi to vote. Please vote by mentioning only the name of the player you want to kill. Mention no other names. The only name you mention will be counted as your vote. The most voted player will die."
@@ -240,28 +266,28 @@ def play():
 
         # Day phase
         alive_players = get_player_names(players, is_alive=True)
-        dead_players = get_player_names(players, is_alive=False)
         append_message(chat, players, 'Moderator', all_names,
             f"It is now day time. {target} has been killed. Discuss."
         )
 
         # Discussion phase
-        for player_name in random.choices(alive_players, k=len(alive_players) * 2):
-            response = get_completion(player_name, players, chat)
-            if response:  # Only add message if we got a response (player is alive)
-                append_message(chat, players, player_name, alive_players, response,
-                    author_alive=True
-                )
+        for _ in range(2):
+            for player_name in random.choices(alive_players, k=len(alive_players)):
+                response = get_completion(player_name, players, chat)
+                if response:
+                    append_message(chat, players, player_name, alive_players, response,
+                        author_alive=True
+                    )
 
         append_message(chat, players, 'Moderator', all_names,
-            "The Day is coming to a close. It is time to vote on who to lynch. Please vote by mentioning only the name of the player you want to lynch and only the name. Mention no other names. The player with the most votes will be lynched."
+            "The Day is coming to a close. It is time to vote on who to kill. Please vote by mentioning only the name of the player you want to kill and only the name. Mention no other names. The player with the most votes will be killed."
         )
         target = process_votes(chat, players, all_names, all_names)
         if target:
             players[target]["is_alive"] = False
             game_over, winner = check_game_over(players)
             if not game_over:
-                append_message(chat, players, 'Moderator', all_names, f"{target} has been lynched.")
+                append_message(chat, players, 'Moderator', all_names, f"{target} has been killed.")
 
     append_message(chat, players, 'Moderator', all_names,
         f"The game is over. The {winner} win!"
