@@ -9,8 +9,17 @@ from dotenv import load_dotenv
 import os
 import random
 import re
+from enum import Enum
 from openai import OpenAI
 from anthropic import Anthropic
+
+class Role(Enum):
+    MAFIOSO = "MAFIOSO"
+    VILLAGER = "VILLAGER"
+    MODERATOR = "MODERATOR"
+    
+    def __str__(self):
+        return self.value
 
 load_dotenv()
 
@@ -53,7 +62,7 @@ def format_chat(chat, players):
     chat_str = ''
     for message in chat:
         content = re.sub(r'\s+', ' ', message["content"].replace('\n', ' '))
-        if message["author"] == 'Moderator':
+        if message["author"] == Role.MODERATOR.value:
             s = f"Moderator: {content}"
             chat_str += s + '\n'
             continue
@@ -67,16 +76,37 @@ def print_chat(chat, players):
 def print_last_message(chat, players):
     print(format_chat(chat[-1:], players))
 
-def save_game(chat, players, filename):
+def get_winner_stats(players, winner_team):
+    """Gather statistics about the winning team."""
+    winners = get_players_by_state(players, is_mafia=(winner_team == "MAFIOSI"))
+    return {
+        "winning_team": winner_team,
+        "winners": [
+            {
+                "name": name,
+                "model": player["model"],
+                "character": player["character"]
+            }
+            for name, player in winners.items()
+        ]
+    }
+
+def save_game(chat, players, filename, winner_team=None):
+    """Save the game state and winner information."""
+    game_data = {
+        'chat': chat,
+        'players': players,
+        'winner': get_winner_stats(players, winner_team) if winner_team else None,
+    }
     with open(filename, 'w') as f:
-        f.write(json.dumps({'chat': chat, 'players': players}, indent=2))
+        f.write(json.dumps(game_data, indent=2))
 
 def get_completion(player_name, players, chat):
     """Get a completion from the LLM for the given player."""
     visible_messages = [msg for msg in chat if player_name in msg["visible_to"]]
     formatted_messages = []
     for msg in visible_messages:
-        if msg["author"] == 'Moderator':
+        if msg["author"] == Role.MODERATOR.value:
             formatted_messages.append({
                 "role": "system",
                 "content": msg["content"],
@@ -123,7 +153,7 @@ def process_votes(chat, players, voters, visible_to):
         for candidate in random.sample(list(players.keys()), len(players)):
             if candidate in response:
                 votes[candidate] = votes.get(candidate, 0) + 1
-                append_message(chat, players, 'Moderator', visible_to, 
+                append_message(chat, players, Role.MODERATOR.value, visible_to, 
                     f"{voter} has voted to kill {candidate}. The current tally is: {json.dumps(votes, indent=2)}"
                 )
                 break
@@ -138,7 +168,7 @@ def append_message(chat, players, author, visible_to, content, author_alive=True
         "author_alive": author_alive,
         "visible_to": visible_to,
         "content": content,
-        "character": "moderator" if author == "Moderator" else players[author]["character"]
+        "character": Role.MODERATOR.value if author == Role.MODERATOR.value else players[author]["character"]
     }
     chat.append(message)
     print_last_message(chat, players)
@@ -150,7 +180,7 @@ def get_players_by_state(players, is_alive=None, is_mafia=None):
     if is_alive is not None:
         filtered = ((n, p) for n, p in filtered if p["is_alive"] == is_alive)
     if is_mafia is not None:
-        filtered = ((n, p) for n, p in filtered if (p["character"] == "mafioso") == is_mafia)
+        filtered = ((n, p) for n, p in filtered if (p["character"] == Role.MAFIOSO.value) == is_mafia)
     return dict(filtered)
 
 def get_player_names(players, **kwargs):
@@ -165,9 +195,9 @@ def check_game_over(players):
     print(f"Players: {json.dumps(players, indent=2)}")
     
     if alive_mafiosi == 0:
-        return True, "Villagers"
+        return True, "VILLAGERS"
     elif alive_mafiosi >= alive_villagers:
-        return True, "Mafiosi"
+        return True, "MAFIOSI"
     return False, None
 
 def play():
@@ -181,13 +211,13 @@ def play():
     players = {
         name: {
             "model": model,
-            "character": "mafioso" if i < num_mafiosi else "villager",
+            "character": Role.MAFIOSO.value if i < num_mafiosi else Role.VILLAGER.value,
             "is_alive": True
         } for i, (name, model) in enumerate(zip(selected_names, models))
     }
 
     chat = []
-    append_message(chat, players, 'Moderator', selected_names,
+    append_message(chat, players, Role.MODERATOR.value, selected_names,
         f"""Welcome to a multi-player game of Mafia! You are one of {len(players)} players, and you will be interacting with other AI players in this conversation. Each player has their own distinct personality and role.
 
 GAME RULES:
@@ -219,7 +249,7 @@ Remember: You are a player, not the moderator. Good luck!"""
 
     # Get introductions
     for player_name in random.sample(selected_names, len(selected_names)):
-        append_message(chat, players, 'Moderator', [player_name],
+        append_message(chat, players, Role.MODERATOR.value, [player_name],
             f"Your name is {player_name}. Please give a short introduction of yourself."
         )
         response = get_completion(player_name, players, chat)
@@ -228,10 +258,10 @@ Remember: You are a player, not the moderator. Good luck!"""
     # Reveal characters
     for player_name, player in players.items():
         message = f"{player_name}, you are a {player['character']}."
-        if player["character"] == "mafioso":
+        if player["character"] == Role.MAFIOSO.value:
             other_mafiosi = [n for n in get_player_names(players, is_mafia=True) if n != player_name]
             message += f" Your fellow Mafiosi are: {', '.join(other_mafiosi)}. The other players are Villagers. The Villagers do not know who the Mafiosi are."
-        append_message(chat, players, 'Moderator', [player_name], message)
+        append_message(chat, players, Role.MODERATOR.value, [player_name], message)
 
     # Game loop
     game_over = False
@@ -244,7 +274,7 @@ Remember: You are a player, not the moderator. Good luck!"""
         mafiosi = get_player_names(players, is_alive=True, is_mafia=True)
         all_names = list(players.keys())
         
-        append_message(chat, players, 'Moderator', all_names,
+        append_message(chat, players, Role.MODERATOR.value, all_names,
             "It is now night time. Mafiosi, please awaken and discuss who to kill. Only the Mafiosi can hear each other."
         )
 
@@ -254,7 +284,7 @@ Remember: You are a player, not the moderator. Good luck!"""
                 response = get_completion(mafioso, players, chat)
                 append_message(chat, players, mafioso, mafiosi, response)
 
-        append_message(chat, players, 'Moderator', mafiosi,
+        append_message(chat, players, Role.MODERATOR.value, mafiosi,
             "It is time for the Mafiosi to vote. Please vote by mentioning only the name of the player you want to kill. Mention no other names. The only name you mention will be counted as your vote. The most voted player will die."
         )
         target = process_votes(chat, players, mafiosi, mafiosi)
@@ -262,11 +292,12 @@ Remember: You are a player, not the moderator. Good luck!"""
             players[target]["is_alive"] = False
             game_over, winner = check_game_over(players)
             if game_over:
+                save_game(chat, players, CHAT_FILE, winner)
                 break
 
         # Day phase
         alive_players = get_player_names(players, is_alive=True)
-        append_message(chat, players, 'Moderator', all_names,
+        append_message(chat, players, Role.MODERATOR.value, all_names,
             f"It is now day time. {target} has been killed. Discuss."
         )
 
@@ -279,19 +310,19 @@ Remember: You are a player, not the moderator. Good luck!"""
                         author_alive=True
                     )
 
-        append_message(chat, players, 'Moderator', all_names,
+        append_message(chat, players, Role.MODERATOR.value, all_names,
             "The Day is coming to a close. It is time to vote on who to kill. Please vote by mentioning only the name of the player you want to kill and only the name. Mention no other names. The player with the most votes will be killed."
         )
         target = process_votes(chat, players, all_names, all_names)
         if target:
             players[target]["is_alive"] = False
+            append_message(chat, players, Role.MODERATOR.value, all_names, f"{target} has been killed.")
             game_over, winner = check_game_over(players)
-            if not game_over:
-                append_message(chat, players, 'Moderator', all_names, f"{target} has been killed.")
 
-    append_message(chat, players, 'Moderator', all_names,
+    append_message(chat, players, Role.MODERATOR.value, all_names,
         f"The game is over. The {winner} win!"
     )
+    save_game(chat, players, CHAT_FILE, winner)
         
 
 if __name__ == "__main__":
