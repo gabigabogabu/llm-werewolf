@@ -1,3 +1,4 @@
 python-dotenv
 anthropic
 OpenAI
+mistralai

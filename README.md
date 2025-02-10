@@ -19,6 +19,12 @@ Other potential metrics:
 
 Todos and issues:
 - [ ] Integrate the other providers
+    - [x] OpenAI
+    - [x] XAI
+    - [x] ANTHROPIC
+    - [ ] Mistral
+    - [ ] DeepSeek
+    - [ ] Google/Gemini
+    - [ ] Alibaba/Qwen
 - [x] Models tend to mis-understand their role, they randomly switch to moderators or impersonate other players
 - [ ] Play multiple games in separate chats to average out true character from outliers
-- [ ] Implement multiple games in sequence in the same chat, so that models can see each others characteristics from previous games
