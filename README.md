@@ -18,13 +18,6 @@ Other potential metrics:
 - avg number of votes given to villagers should be low (Few false positives)
 
 Todos and issues:
-- [ ] Integrate the other providers
-    - [x] OpenAI
-    - [x] XAI
-    - [x] ANTHROPIC
-    - [ ] Mistral
-    - [ ] DeepSeek
-    - [ ] Google/Gemini
-    - [ ] Alibaba/Qwen
+- [x] Integrate openrouter
 - [x] Models tend to mis-understand their role, they randomly switch to moderators or impersonate other players
 - [ ] Play multiple games in separate chats to average out true character from outliers

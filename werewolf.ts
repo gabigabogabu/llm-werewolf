@@ -3,20 +3,15 @@
  * In this file, multiple LLMs will play the game of Werewolf.
  */
 
-import { Anthropic } from '@anthropic-ai/sdk';
-import { Mistral } from '@mistralai/mistralai';
-import fs from 'fs';
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/index.mjs';
+import fs from 'fs';
 import z from 'zod';
 import shuffle from 'lodash/shuffle';
 
 // Load environment variables
 const env = z.object({
-  OPENAI_API_KEY: z.string().optional(),
-  XAI_API_KEY: z.string().optional(),
-  ANTHROPIC_API_KEY: z.string().optional(),
-  MISTRAL_API_KEY: z.string().optional(),
+  OPEN_ROUTER_API_KEY: z.string(),
 }).parse(process.env);
 
 enum Role {
@@ -26,20 +21,14 @@ enum Role {
 }
 
 // Configuration
-const NAME_LIST = ["Alice", "Bob", "Charlie", "David", "Eve", "Frank", "Grace", "Hannah", "Isaac", "Jane", "Carlos", "Maria", "Luis", "Sofia", "Diego", "Carmen", "Miguel", "Isabella", "Wei", "Ming", "Yuki", "Hiroshi", "Jin", "Mei", "Kumar", "Priya", "Raj", "Ahmed", "Fatima", "Omar", "Leila", "Hassan", "Yasmin", "Zara", "Kwame", "Amara", "Zola", "Thabo", "Aisha", "Chioma", "Kofi", "Erik", "Astrid", "Lars", "Ingrid", "Magnus", "Freya", "Ivan", "Natasha", "Boris", "Katya", "Dmitri", "Olga", "Andreas", "Helena", "Stavros", "Sophia", "Theos"];
-const LLM_ORGS = ['OPENAI', 'XAI', 'ANTHROPIC', 'MISTRAL'];
+const LLMS = fs.readFileSync('llms.txt', 'utf8').split('\n').map(l => l.trim()).filter(l => l.length > 0);
+const NAME_LIST = fs.readFileSync('names.txt', 'utf8').split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-// API keys
-const API_KEYS: Record<string, string | undefined> = {};
-for (const org of LLM_ORGS) {
-  API_KEYS[org] = env[`${org}_API_KEY` as keyof typeof env];
-}
-
-// Initialize API clients
-const openaiClient = API_KEYS['OPENAI'] ? new OpenAI({ apiKey: API_KEYS['OPENAI'] }) : null;
-const xaiClient = API_KEYS['XAI'] ? new OpenAI({ apiKey: API_KEYS['XAI'], baseURL: "https://api.x.ai/v1" }) : null;
-const anthropicClient = API_KEYS['ANTHROPIC'] ? new Anthropic({ apiKey: API_KEYS['ANTHROPIC'] }) : null;
-const mistralClient = API_KEYS['MISTRAL'] ? new Mistral({ apiKey: API_KEYS['MISTRAL'] }) : null;
+// Initialize OpenRouter client
+const openRouterClient = new OpenAI({
+  apiKey: env.OPEN_ROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
 
 // Types
 interface Message {
@@ -98,119 +87,28 @@ interface GameData {
 
 type CompletionFunction = (chat: FormattedMessage[]) => Promise<string>;
 
-// LLM chat completion functions
-const openaiSdkChatCompletion = (
-  client: OpenAI,
-  model: string,
-  systemAlias: ChatCompletionMessageParam['role'] = 'system',
-  nonUserHasName: boolean = true
+const getChatCompletion = (
+  model: string
 ): CompletionFunction => async (chat: FormattedMessage[]): Promise<string> => {
     const messages = chat.map(m => ({
-      role: m.role === "system" ? systemAlias : m.role,
+      role: m.role,
       content: m.content,
-      name: m.role === "user" || nonUserHasName ? m.name : undefined
+      name: m.name
     })) as ChatCompletionMessageParam[];
 
     try {
-      const completion = await client.chat.completions.create({
-        model,
-        messages
-      });
-
+      const completion = await openRouterClient.chat.completions.create({ model, messages });
       return completion.choices[0]?.message.content || '';
     } catch (error) {
-      console.error(`Error with OpenAI completion for ${model}:`, error);
+      console.error(`Error with OpenRouter completion for ${model}:`, error);
       return '';
     }
   };
 
-const anthropicSdkChatCompletion = (
-  client: Anthropic,
-  model: string,
-  maxTokens: number = 8192
-): CompletionFunction => async (chat: FormattedMessage[]): Promise<string> => {
-    const messages = chat.map(m => ({
-      role: m.role !== "system" ? m.role : "user",
-      content: m.role === "user" ? `${m.name}: ${m.content}` : m.content,
-    }));
-
-    try {
-      const completion = await client.messages.create({
-        model,
-        messages,
-        max_tokens: maxTokens,
-      });
-
-      return completion.content.filter(block => block.type === 'text')
-        .map(block => (block.type === 'text' ? block.text : ''))
-        .join('') || '';
-    } catch (error) {
-      console.error(`Error with Anthropic completion for ${model}:`, error);
-      return '';
-    }
-  };
-
-const mistralSdkChatCompletion = (
-  client: Mistral,
-  model: string,
-  systemAlias: 'system' | 'user' = 'user'
-): CompletionFunction => async (chat: FormattedMessage[]): Promise<string> => {
-    const messages = chat.map(m => ({
-      role: m.role === "system" ? systemAlias : m.role,
-      content: m.content,
-      name: m.name
-    }));
-
-    try {
-      const completion = await client.chat.complete({
-        model,
-        messages
-      });
-
-      const content = completion.choices?.[0]?.message.content;
-      if (Array.isArray(content)) {
-        return content.map(chunk => typeof chunk === 'string' ? chunk : '').join('') || '';
-      }
-      return content || '';
-    } catch (error) {
-      console.error(`Error with Mistral completion for ${model}:`, error);
-      return '';
-    }
-  };
-
-// Initialize available LLMs
-const llms: Record<string, CompletionFunction | null> = {
-  // OpenAI
-  'openai/o1-mini-2024-09-12': openaiClient ? openaiSdkChatCompletion(openaiClient, 'o1-mini-2024-09-12', 'user') : null,
-  'openai/o1-mini': openaiClient ? openaiSdkChatCompletion(openaiClient, 'o1-mini', 'user') : null,
-  'openai/o1-preview-2024-09-12': openaiClient ? openaiSdkChatCompletion(openaiClient, 'o1-preview-2024-09-12', 'user') : null,
-  'openai/o1-preview': openaiClient ? openaiSdkChatCompletion(openaiClient, 'o1-preview', 'user') : null,
-  'openai/chatgpt-4o-latest': openaiClient ? openaiSdkChatCompletion(openaiClient, 'chatgpt-4o-latest', 'developer') : null,
-  'openai/gpt-4o-2024-05-13': openaiClient ? openaiSdkChatCompletion(openaiClient, 'gpt-4o-2024-05-13', 'developer') : null,
-  'openai/gpt-4o-2024-08-06': openaiClient ? openaiSdkChatCompletion(openaiClient, 'gpt-4o-2024-08-06', 'developer') : null,
-  'openai/gpt-4o-2024-11-20': openaiClient ? openaiSdkChatCompletion(openaiClient, 'gpt-4o-2024-11-20', 'developer') : null,
-  'openai/gpt-4o': openaiClient ? openaiSdkChatCompletion(openaiClient, 'gpt-4o', 'developer') : null,
-
-  // XAI
-  'xai/grok-2-1212': xaiClient ? openaiSdkChatCompletion(xaiClient, 'grok-2-1212', 'system', false) : null,
-
-  // Anthropic
-  'anthropic/claude-3-5-sonnet-20241022': anthropicClient ? anthropicSdkChatCompletion(anthropicClient, 'claude-3-5-sonnet-20241022') : null,
-  'anthropic/claude-3-5-haiku-20241022': anthropicClient ? anthropicSdkChatCompletion(anthropicClient, 'claude-3-5-haiku-20241022') : null,
-  'anthropic/claude-3-5-sonnet-20240620': anthropicClient ? anthropicSdkChatCompletion(anthropicClient, 'claude-3-5-sonnet-20240620') : null,
-
-  // Mistral
-  'mistral/mistral-large-2411': mistralClient ? mistralSdkChatCompletion(mistralClient, 'mistral-large-2411') : null,
-  'mistral/ministral-3b-2410': mistralClient ? mistralSdkChatCompletion(mistralClient, 'ministral-3b-2410') : null,
-  'mistral/ministral-8b-2410': mistralClient ? mistralSdkChatCompletion(mistralClient, 'ministral-8b-2410') : null,
-  'mistral/open-mistral-nemo-2407': mistralClient ? mistralSdkChatCompletion(mistralClient, 'open-mistral-nemo-2407') : null,
-};
-
-// Filter out null values
-const availableLlms: Record<string, CompletionFunction> = {};
-for (const [key, value] of Object.entries(llms)) {
-  if (value) availableLlms[key] = value;
-}
+const availableLlms: Record<string, CompletionFunction> = LLMS.reduce((acc, model) => {
+  acc[model] = getChatCompletion(model);
+  return acc;
+}, {} as Record<string, CompletionFunction>);
 
 function printLastMessage(chat: Message[], players: Record<string, Player>): void {
   const message = chat[chat.length - 1];
