@@ -9,16 +9,13 @@ import fs from 'fs';
 import z from 'zod';
 import shuffle from 'lodash/shuffle';
 
-// Load environment variables
 const env = z.object({
   OPEN_ROUTER_API_KEY: z.string(),
 }).parse(process.env);
 
-// Configuration
 const LLMS = fs.readFileSync('llms.txt', 'utf8').split('\n').map(l => l.trim()).filter(l => l.length > 0);
 const NAME_LIST = fs.readFileSync('names.txt', 'utf8').split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-// Initialize OpenRouter client
 const openRouterClient = new OpenAI({
   apiKey: env.OPEN_ROUTER_API_KEY,
   baseURL: 'https://openrouter.ai/api/v1',
@@ -33,7 +30,6 @@ enum Character {
 
 interface Message {
   author: string;
-  author_alive: boolean;
   visible_to: string[];
   content: string;
   character?: Character;
@@ -109,15 +105,14 @@ const availableLlms: Record<string, CompletionFunction> = LLMS.reduce((acc, mode
   return acc;
 }, {} as Record<string, CompletionFunction>);
 
-function printLastMessage(chat: Message[], players: Record<string, Player>): void {
-  const message = chat[chat.length - 1];
+function printMessage(message: Message, players: Record<string, Player>): void {
   const content = message.content.replace(/\s+/g, ' ').replace(/\n/g, ' ');
   const author = message.author;
 
   if (author === Character.MODERATOR) {
     console.log(`Moderator: ${content}`);
   } else {
-    console.log(`${author} (${message.character}${message.author_alive ? '' : ' - dead'}) (${players[author].model}): ${content}`);
+    console.log(`${author} (${message.character}) (${players[author].model}): ${content}`);
   }
   console.log();
 }
@@ -195,39 +190,34 @@ function calculateStatistics(numMatches: number): Statistics {
 }
 
 class Game {
-  matchIdx: number;
   chat: Message[];
   players: Record<string, Player>;
-  numWerewolves: number;
-  numRounds: { night: number; day: number };
 
+  /**
+   * @param matchIdx - The index of the match
+   * @param numWerewolves - The number of werewolves, if a number between 0 and 1, percentage of the total players, otherwise absolute number
+   * @param numNightDiscussionRounds - The number of night discussion rounds
+   * @param numDayDiscussionRounds - The number of day discussion rounds
+   */
   constructor(
-    matchIdx: number,
-    playersPerModel: number = 1,
-    numWerewolves: number = 1 / 3,
-    numNightDiscussionRounds: number = 2,
-    numDayDiscussionRounds: number = 2
+    private matchIdx: number,
+    private numWerewolves: number,
+    private numNightDiscussionRounds: number,
+    private numDayDiscussionRounds: number
   ) {
-    this.matchIdx = matchIdx;
     this.chat = [];
 
     const modelKeys = Object.keys(availableLlms);
-    const usedNames = shuffle(NAME_LIST).slice(0, modelKeys.length * playersPerModel);
-    const models = Array(playersPerModel).fill(modelKeys).flat();
+    const usedNames = shuffle(NAME_LIST).slice(0, modelKeys.length);
 
-    this.numWerewolves = numWerewolves < 1
-      ? Math.floor(numWerewolves * usedNames.length)
-      : numWerewolves as number;
-
-    this.numRounds = {
-      night: numNightDiscussionRounds,
-      day: numDayDiscussionRounds
-    };
+    this.numWerewolves = this.numWerewolves < 1
+      ? Math.floor(this.numWerewolves * usedNames.length)
+      : this.numWerewolves as number;
 
     this.players = {};
     for (let i = 0; i < usedNames.length; i++) {
       this.players[usedNames[i]] = {
-        model: models[i],
+        model: modelKeys[i],
         character: undefined,
         is_alive: true
       };
@@ -257,17 +247,16 @@ class Game {
     fs.writeFileSync(filename, JSON.stringify(gameData, null, 2));
   }
 
-  appendMessage(author: string, visibleTo: string[], content: string, authorAlive: boolean = true): void {
+  appendMessage(authorName: string, visibleToNames: string[], content: string): void {
     const message: Message = {
-      author,
-      author_alive: authorAlive,
-      visible_to: visibleTo,
+      author: authorName,
+      visible_to: visibleToNames,
       content,
-      character: author === Character.MODERATOR ? Character.MODERATOR : this.players[author].character
+      character: authorName === 'MODERATOR' ? Character.MODERATOR : this.players[authorName].character
     };
 
     this.chat.push(message);
-    printLastMessage(this.chat, this.players);
+    printMessage(message, this.players);
     this.saveGame();
   }
 
@@ -276,7 +265,7 @@ class Game {
     const formattedMessages: FormattedMessage[] = [];
 
     for (const msg of visibleMessages) {
-      if (msg.author === Character.MODERATOR) {
+      if (msg.author === 'MODERATOR') {
         formattedMessages.push({
           role: "system",
           content: msg.content,
@@ -329,7 +318,7 @@ class Game {
 
     for (const voter of shuffledVoters) {
       this.appendMessage(
-        Character.MODERATOR,
+        'MODERATOR',
         [voter],
         `${voter}, please vote by naming the player you want to eliminate.`
       );
@@ -344,7 +333,7 @@ class Game {
         if (response.includes(candidate)) {
           if (!aliveCandidates.includes(candidate)) {
             this.appendMessage(
-              Character.MODERATOR,
+              'MODERATOR',
               visibleTo,
               `${voter}'s vote for ${candidate} was ignored as they are already dead.`
             );
@@ -353,7 +342,7 @@ class Game {
 
           votes[candidate] = (votes[candidate] || 0) + 1;
           this.appendMessage(
-            Character.MODERATOR,
+            'MODERATOR',
             visibleTo,
             `${voter} has voted to eliminate ${candidate}. The current tally is: ${JSON.stringify(votes, null, 2)}`
           );
@@ -458,12 +447,12 @@ You will soon receive your specific role and team assignment. First, let's have 
 
 Remember: You are a player, not the moderator.`;
 
-    this.appendMessage(Character.MODERATOR, allPlayers, welcomeMsg);
+    this.appendMessage('MODERATOR', allPlayers, welcomeMsg);
 
     // Get introductions
     for (const player of shuffle(allPlayers)) {
       this.appendMessage(
-        Character.MODERATOR,
+        'MODERATOR',
         [player],
         `Your name is ${player}. Please give a short introduction of yourself.`
       );
@@ -514,7 +503,7 @@ Remember: You are a player, not the moderator.`;
         "Night falls. Werewolves awaken and discuss their target. Only the Werewolves can hear each other."
       );
 
-      for (let round = 0; round < this.numRounds.night; round++) {
+      for (let round = 0; round < this.numNightDiscussionRounds; round++) {
         for (const werewolf of shuffle(werewolves)) {
           const response = await this.letPlayerTalk(werewolf);
           this.appendMessage(werewolf, werewolves, response);
@@ -548,7 +537,7 @@ Remember: You are a player, not the moderator.`;
         "Day breaks. Discuss the night's events."
       );
 
-      for (let round = 0; round < this.numRounds.day; round++) {
+      for (let round = 0; round < this.numDayDiscussionRounds; round++) {
         for (const player of shuffle(alivePlayers)) {
           const response = await this.letPlayerTalk(player);
           if (response) {
@@ -589,20 +578,34 @@ Remember: You are a player, not the moderator.`;
   }
 }
 
-async function play(matchIdx: number, options: any = {}): Promise<void> {
-  const game = new Game(matchIdx, options.playersPerModel, options.numWerewolves,
-    options.numNightDiscussionRounds, options.numDayDiscussionRounds);
+async function play({
+  matchIdx,
+  numWerewolves,
+  numNightDiscussionRounds,
+  numDayDiscussionRounds
+}: {
+  matchIdx: number;
+  numWerewolves: number;
+  numNightDiscussionRounds: number;
+  numDayDiscussionRounds: number;
+}): Promise<void> {
+  const game = new Game(matchIdx, numWerewolves, numNightDiscussionRounds, numDayDiscussionRounds);
   await game.play();
 }
 
 async function main(): Promise<void> {
-  const numMatches = 2;
+  const gameStartStats = {
+    numMatches: 2,
+    numWerewolves: 1 / 3,
+    numNightDiscussionRounds: 2,
+    numDayDiscussionRounds: 2
+  };
 
-  for (let i = 0; i < numMatches; i++) {
-    await play(i);
+  for (let i = 0; i < gameStartStats.numMatches; i++) {
+    await play({ ...gameStartStats, matchIdx: i });
   }
 
-  const stats = calculateStatistics(numMatches);
+  const stats = calculateStatistics(gameStartStats.numMatches);
   console.log("\nGame Statistics:");
   console.log(`Villager Win Rate: ${(stats.villager_winrate * 100).toFixed(2)}%`);
   console.log(`Werewolf Win Rate: ${(stats.werewolf_winrate * 100).toFixed(2)}%`);
