@@ -17,7 +17,53 @@ Other potential metrics:
 - avg number of votes given to mafia should be high (Many true positives)
 - avg number of votes given to villagers should be low (Few false positives)
 
-Todos and issues:
-- [x] Integrate openrouter
-- [x] Models tend to mis-understand their role, they randomly switch to moderators or impersonate other players
-- [ ] Play multiple games in separate chats to average out true character from outliers
+To run a new game of Werewolf, use:
+
+```bash
+bun werewolf.ts
+```
+
+This will:
+1. Randomly assign roles to different AI models
+2. Run through night and day phases
+3. Save the complete game transcript to the `matches/` directory
+
+## Analyzing Game Statistics
+
+You can analyze the performance of different LLM models across games using:
+
+```bash
+bun eval.ts
+```
+
+This generates statistics on:
+- Overall win rates per model
+- Survival rates per model (alive at the end of the game)
+- Win rates as Villager per model
+- Win rates as Werewolf per model
+- Role distribution
+- Game-wide statistics
+
+The statistics are saved to `stats/werewolf_stats.md` and can be viewed directly in GitHub.
+
+## Current Statistics
+
+<!-- begin stats -->
+## Game Statistics
+
+The latest Werewolf game statistics are available in the [detailed statistics report](stats/werewolf_stats.md).
+<!-- end stats -->
+
+## Project Structure
+
+- `werewolf.ts` - Main game engine
+- `llms.txt` - List of LLM models to use as players
+- `names.txt` - List of player names
+- `matches/` - Directory containing game transcripts
+- `eval.ts` - Script to analyze game statistics
+- `stats/` - Directory containing generated statistics
+
+## Requirements
+
+- [Bun](https://bun.sh/) runtime
+- OpenRouter API key for accessing multiple LLM models
