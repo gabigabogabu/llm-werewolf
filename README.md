@@ -35,13 +35,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 To run a new game of Werewolf, use:
 
 ```bash
-bun werewolf.ts
+OPEN_ROUTER_API_KEY=sk-or-v1-asdf bun werewolf.ts
 ```
 
 This will:
-1. Randomly assign roles to different AI models
+1. Randomly assign roles to 10 different AI models
 2. Run through night and day phases
 3. Save the complete game transcript to the `matches/` directory
+
+Running a single game typically costs $5 USD on openrouter.
 
 ## Analyzing Game Statistics
 
