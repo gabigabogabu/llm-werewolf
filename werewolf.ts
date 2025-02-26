@@ -14,12 +14,6 @@ const env = z.object({
   OPEN_ROUTER_API_KEY: z.string(),
 }).parse(process.env);
 
-enum Role {
-  WEREWOLF = "WEREWOLF",
-  VILLAGER = "VILLAGER",
-  MODERATOR = "MODERATOR"
-}
-
 // Configuration
 const LLMS = fs.readFileSync('llms.txt', 'utf8').split('\n').map(l => l.trim()).filter(l => l.length > 0);
 const NAME_LIST = fs.readFileSync('names.txt', 'utf8').split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -31,12 +25,18 @@ const openRouterClient = new OpenAI({
 });
 
 // Types
+enum Character {
+  WEREWOLF = "WEREWOLF",
+  VILLAGER = "VILLAGER",
+  MODERATOR = "MODERATOR"
+}
+
 interface Message {
   author: string;
   author_alive: boolean;
   visible_to: string[];
   content: string;
-  character: string;
+  character?: Character;
 }
 
 interface FormattedMessage {
@@ -47,7 +47,7 @@ interface FormattedMessage {
 
 interface Player {
   model: string;
-  character: string | null;
+  character?: Character;
   is_alive: boolean;
 }
 
@@ -71,11 +71,10 @@ interface Statistics {
 }
 
 interface Winner {
-  winning_team: string;
+  winning_team: Character;
   winners: {
     name: string;
     model: string;
-    character: string;
   }[];
 }
 
@@ -115,7 +114,7 @@ function printLastMessage(chat: Message[], players: Record<string, Player>): voi
   const content = message.content.replace(/\s+/g, ' ').replace(/\n/g, ' ');
   const author = message.author;
 
-  if (author === Role.MODERATOR) {
+  if (author === Character.MODERATOR) {
     console.log(`Moderator: ${content}`);
   } else {
     console.log(`${author} (${message.character}${message.author_alive ? '' : ' - dead'}) (${players[author].model}): ${content}`);
@@ -138,7 +137,7 @@ function calculateStatistics(numMatches: number): Statistics {
 
       totalMatches++;
       const winnerTeam = gameData.winner.winning_team;
-      if (winnerTeam === "VILLAGERS") {
+      if (winnerTeam === Character.VILLAGER) {
         villagerWins++;
       } else {
         werewolfWins++;
@@ -147,8 +146,8 @@ function calculateStatistics(numMatches: number): Statistics {
       // Track model stats
       for (const [name, player] of Object.entries(gameData.players)) {
         const model = player.model;
-        const isWerewolf = player.character === "WEREWOLF";
-        const won = (isWerewolf && winnerTeam === "WEREWOLVES") || (!isWerewolf && winnerTeam === "VILLAGERS");
+        const isWerewolf = player.character === Character.WEREWOLF;
+        const won = (isWerewolf && winnerTeam === Character.WEREWOLF) || (!isWerewolf && winnerTeam === Character.VILLAGER);
 
         if (!modelStats[model]) {
           modelStats[model] = {
@@ -229,14 +228,14 @@ class Game {
     for (let i = 0; i < usedNames.length; i++) {
       this.players[usedNames[i]] = {
         model: models[i],
-        character: null,
+        character: undefined,
         is_alive: true
       };
     }
   }
 
-  getWinnerStats(winnerTeam: string): Winner {
-    const winners = this.getPlayersByState({ isWerewolf: winnerTeam === "WEREWOLVES" });
+  getWinnerStats(winnerTeam: Character): Winner {
+    const winners = this.getPlayersByState({ isWerewolf: winnerTeam === Character.WEREWOLF });
     return {
       winning_team: winnerTeam,
       winners: Object.entries(winners).map(([name, player]) => ({
@@ -247,7 +246,7 @@ class Game {
     };
   }
 
-  saveGame(winnerTeam?: string): void {
+  saveGame(winnerTeam?: Character): void {
     const gameData: GameData = {
       chat: this.chat,
       players: this.players,
@@ -264,7 +263,7 @@ class Game {
       author_alive: authorAlive,
       visible_to: visibleTo,
       content,
-      character: author === Role.MODERATOR ? Role.MODERATOR : this.players[author].character || ""
+      character: author === Character.MODERATOR ? Character.MODERATOR : this.players[author].character
     };
 
     this.chat.push(message);
@@ -277,7 +276,7 @@ class Game {
     const formattedMessages: FormattedMessage[] = [];
 
     for (const msg of visibleMessages) {
-      if (msg.author === Role.MODERATOR) {
+      if (msg.author === Character.MODERATOR) {
         formattedMessages.push({
           role: "system",
           content: msg.content,
@@ -330,7 +329,7 @@ class Game {
 
     for (const voter of shuffledVoters) {
       this.appendMessage(
-        Role.MODERATOR,
+        Character.MODERATOR,
         [voter],
         `${voter}, please vote by naming the player you want to eliminate.`
       );
@@ -345,7 +344,7 @@ class Game {
         if (response.includes(candidate)) {
           if (!aliveCandidates.includes(candidate)) {
             this.appendMessage(
-              Role.MODERATOR,
+              Character.MODERATOR,
               visibleTo,
               `${voter}'s vote for ${candidate} was ignored as they are already dead.`
             );
@@ -354,7 +353,7 @@ class Game {
 
           votes[candidate] = (votes[candidate] || 0) + 1;
           this.appendMessage(
-            Role.MODERATOR,
+            Character.MODERATOR,
             visibleTo,
             `${voter} has voted to eliminate ${candidate}. The current tally is: ${JSON.stringify(votes, null, 2)}`
           );
@@ -391,7 +390,7 @@ class Game {
         include = false;
       }
 
-      if (isWerewolf !== undefined && (player.character === Role.WEREWOLF) !== isWerewolf) {
+      if (isWerewolf !== undefined && (player.character === Character.WEREWOLF) !== isWerewolf) {
         include = false;
       }
 
@@ -407,17 +406,17 @@ class Game {
     return Object.keys(this.getPlayersByState(options));
   }
 
-  checkGameOver(): [boolean, string | null] {
+  checkGameOver(): { gameOver: boolean, winner?: Character } {
     const aliveWerewolves = Object.keys(this.getPlayersByState({ isAlive: true, isWerewolf: true })).length;
     const aliveVillagers = Object.keys(this.getPlayersByState({ isAlive: true, isWerewolf: false })).length;
 
     if (aliveWerewolves === 0) {
-      return [true, "VILLAGERS"];
+      return { gameOver: true, winner: Character.VILLAGER };
     } else if (aliveWerewolves >= aliveVillagers) {
-      return [true, "WEREWOLVES"];
+      return { gameOver: true, winner: Character.WEREWOLF };
     }
 
-    return [false, null];
+    return { gameOver: false };
   }
 
   async play(): Promise<void> {
@@ -459,12 +458,12 @@ You will soon receive your specific role and team assignment. First, let's have 
 
 Remember: You are a player, not the moderator.`;
 
-    this.appendMessage(Role.MODERATOR, allPlayers, welcomeMsg);
+    this.appendMessage(Character.MODERATOR, allPlayers, welcomeMsg);
 
     // Get introductions
     for (const player of shuffle(allPlayers)) {
       this.appendMessage(
-        Role.MODERATOR,
+        Character.MODERATOR,
         [player],
         `Your name is ${player}. Please give a short introduction of yourself.`
       );
@@ -479,7 +478,7 @@ Remember: You are a player, not the moderator.`;
 
     for (let i = 0; i < playerEntries.length; i++) {
       const [playerName, player] = playerEntries[i];
-      player.character = i < this.numWerewolves ? Role.WEREWOLF : Role.VILLAGER;
+      player.character = i < this.numWerewolves ? Character.WEREWOLF : Character.VILLAGER;
     }
 
     // Rebuild players object from shuffled entries
@@ -492,17 +491,17 @@ Remember: You are a player, not the moderator.`;
     for (const [playerName, player] of playerEntries) {
       let message = `${playerName}, you are a ${player.character}.`;
 
-      if (player.character === Role.WEREWOLF) {
+      if (player.character === Character.WEREWOLF) {
         const otherWerewolves = this.getPlayerNames({ isWerewolf: true }).filter(n => n !== playerName);
         message += ` Your fellow Werewolves are: ${otherWerewolves.join(', ')}. The other players are Villagers.`;
       }
 
-      this.appendMessage(Role.MODERATOR, [playerName], message);
+      this.appendMessage(Character.MODERATOR, [playerName], message);
     }
 
     // Game loop
     let gameOver = false;
-    let winner: string | null = null;
+    let winner: Character | undefined;
 
     for (let loop = 0; loop < Math.floor(Object.keys(this.players).length / 2); loop++) {
       if (gameOver) break;
@@ -510,7 +509,7 @@ Remember: You are a player, not the moderator.`;
       // Night phase
       const werewolves = this.getPlayerNames({ isAlive: true, isWerewolf: true });
       this.appendMessage(
-        Role.MODERATOR,
+        Character.MODERATOR,
         allPlayers,
         "Night falls. Werewolves awaken and discuss their target. Only the Werewolves can hear each other."
       );
@@ -523,7 +522,7 @@ Remember: You are a player, not the moderator.`;
       }
 
       this.appendMessage(
-        Role.MODERATOR,
+        Character.MODERATOR,
         werewolves,
         "Werewolves, vote to eliminate one player. Mention only their name."
       );
@@ -532,19 +531,19 @@ Remember: You are a player, not the moderator.`;
       if (target) {
         this.players[target].is_alive = false;
         this.appendMessage(
-          Role.MODERATOR,
+          Character.MODERATOR,
           allPlayers,
           `${target} was found dead.`
         );
 
-        [gameOver, winner] = this.checkGameOver();
+        ({ gameOver, winner } = this.checkGameOver());
         if (gameOver) break;
       }
 
       // Day phase
       const alivePlayers = this.getPlayerNames({ isAlive: true });
       this.appendMessage(
-        Role.MODERATOR,
+        Character.MODERATOR,
         allPlayers,
         "Day breaks. Discuss the night's events."
       );
@@ -559,7 +558,7 @@ Remember: You are a player, not the moderator.`;
       }
 
       this.appendMessage(
-        Role.MODERATOR,
+        Character.MODERATOR,
         allPlayers,
         "Time to vote. Name the player you suspect is a Werewolf."
       );
@@ -568,18 +567,18 @@ Remember: You are a player, not the moderator.`;
       if (dayTarget) {
         this.players[dayTarget].is_alive = false;
         this.appendMessage(
-          Role.MODERATOR,
+          Character.MODERATOR,
           allPlayers,
           `${dayTarget} has been eliminated by vote.`
         );
 
-        [gameOver, winner] = this.checkGameOver();
+        ({ gameOver, winner } = this.checkGameOver());
       }
     }
 
     const werewolfNames = this.getPlayerNames({ isWerewolf: true });
     this.appendMessage(
-      Role.MODERATOR,
+      Character.MODERATOR,
       allPlayers,
       `Game Over! The ${winner} win! The Werewolves were: ${werewolfNames.join(', ')}`
     );
