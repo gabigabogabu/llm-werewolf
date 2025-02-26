@@ -30,7 +30,7 @@ enum Character {
 
 interface Message {
   author: string;
-  visible_to: string[];
+  visibleTo: string[];
   content: string;
   character?: Character;
 }
@@ -115,8 +115,8 @@ function printMessage(message: Message, players: Record<string, Player>): void {
   const author = message.author;
 
   if (author === Character.MODERATOR) {
-    if (message.visible_to.length === 1 && Object.keys(players).length > 1) {
-      console.log(`Moderator (to ${message.visible_to[0]}): ${content}`);
+    if (message.visibleTo.length === 1 && Object.keys(players).length > 1) {
+      console.log(`Moderator (to ${message.visibleTo[0]}): ${content}`);
     } else {
       console.log(`Moderator: ${content}`);
     }
@@ -265,7 +265,7 @@ class Game {
   appendMessage(authorName: string, visibleToNames: string[], content: string): void {
     const message: Message = {
       author: authorName,
-      visible_to: visibleToNames,
+      visibleTo: visibleToNames,
       content,
       character: authorName === 'MODERATOR' ? Character.MODERATOR : this.players[authorName].character
     };
@@ -276,7 +276,7 @@ class Game {
   }
 
   async letPlayerTalk(playerName: string): Promise<string> {
-    const visibleMessages = this.chat.filter(msg => msg.visible_to.includes(playerName));
+    const visibleMessages = this.chat.filter(msg => msg.visibleTo.includes(playerName));
     const formattedMessages: FormattedMessage[] = [];
 
     for (const msg of visibleMessages) {
