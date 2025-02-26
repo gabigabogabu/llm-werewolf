@@ -9,6 +9,7 @@ import fs from 'fs';
 import z from 'zod';
 import shuffle from 'lodash/shuffle';
 import yaml from 'yaml';
+import path from 'path';
 
 const env = z.object({
   OPEN_ROUTER_API_KEY: z.string(),
@@ -123,8 +124,10 @@ class Game {
       winner: this.winnerTeam,
     };
 
+    const dir = './matches';
     const filename = `werewolf_match_${new Date().toISOString().split('T')[0]}_${this.matchIdx}.json`;
-    fs.writeFileSync(filename, JSON.stringify(gameData, null, 2));
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, filename), JSON.stringify(gameData, null, 2));
   }
 
   private appendMessage({ from, to, phase, content }: Message): void {

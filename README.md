@@ -1,21 +1,36 @@
-LLMs playing mafia
+# LLM-Werewolf: LLMs Playing Werewolf
 
-https://en.wikipedia.org/wiki/Mafia_(party_game)
+This project simulates multiple AI language models playing the social deduction game Werewolf. Different AI models take on roles as either Villagers or Werewolves, and interact with each other to deduce who's who. Also known as Mafia.
 
-The game models a conflict between two groups: an informed minority (the mafiosi or the werewolves) and an uninformed majority (the villagers). At the start of the game, each player is secretly assigned a role affiliated with one of these teams. The game has two alternating phases: first, a night-phase, during which those with night-killing-powers may covertly kill other players, and second, a day-phase, in which all surviving players debate and vote to eliminate a suspect. The game continues until a faction achieves its win-condition; for the village, this usually means eliminating the evil minority, while for the minority, this usually means reaching numerical parity with the village and eliminating any rival evil groups.
+[Mafia](https://en.wikipedia.org/wiki/Mafia_(party_game))
 
-Metrics:
-- Total winrate of a model should be high
-- Winrate of a model as villager should be high
-- Winrate of a model as mafia should be low (signals deception?)
+## TLDR
 
-Other potential metrics:
-- avg number of teammates killed by other team should be low
-- avg number of teammates killed by own team should be low
-- avg number of turns to win should be low
-- avg number of votes received should be low (Other models trust this model)
-- avg number of votes given to mafia should be high (Many true positives)
-- avg number of votes given to villagers should be low (Few false positives)
+- Players are divided into two teams: Werewolves and Villagers
+- Each night, Werewolves choose a Villager to eliminate
+- Each day, all players discuss and vote to eliminate a suspected Werewolf
+- Werewolves win if they equal or outnumber Villagers
+- Villagers win if they eliminate all Werewolves
+
+## Project Structure
+
+- `werewolf.ts` - Main game engine
+- `llms.txt` - List of LLM models to use as players
+- `names.txt` - List of player names
+- `matches/` - Directory containing game transcripts
+- `eval.ts` - Script to analyze game statistics
+- `stats/` - Directory containing generated statistics
+
+## Requirements
+
+- [Bun](https://bun.sh/) runtime
+- OpenRouter API key for accessing multiple LLM models
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Running a Game
 
 To run a new game of Werewolf, use:
 
@@ -46,24 +61,34 @@ This generates statistics on:
 
 The statistics are saved to `stats/werewolf_stats.md` and can be viewed directly in GitHub.
 
-## Current Statistics
-
 <!-- begin stats -->
-## Game Statistics
+# Werewolf Game Statistics
 
-The latest Werewolf game statistics are available in the [detailed statistics report](stats/werewolf_stats.md).
+*Last updated: 2025-02-26*
+
+## Model Performance (Sorted by Win Rate)
+
+| Model | Games | Win % | Survival % | Villager Games (% of total) | Villager Win Rate | Werewolf Games (% of total) | Werewolf Win Rate |
+|-------|-------|-------|------------|-----------------------------|-------------------|-----------------------------|-------------------|
+| x-ai/grok-2-vision-1212 | 1 | 100.0% | 0.0% | 0 (0.0%) | 0.0% | 1 (100.0%) | 100.0% |
+| openai/gpt-4-turbo-preview | 1 | 100.0% | 100.0% | 0 (0.0%) | 0.0% | 1 (100.0%) | 100.0% |
+| x-ai/grok-2-1212 | 1 | 100.0% | 100.0% | 0 (0.0%) | 0.0% | 1 (100.0%) | 100.0% |
+| openai-gpt-4o | 9 | 33.3% | 44.4% | 6 (66.7%) | 0.0% | 3 (33.3%) | 100.0% |
+| openai/chatgpt-4o-latest | 1 | 0.0% | 0.0% | 1 (100.0%) | 0.0% | 0 (0.0%) | 0.0% |
+| aion-labs/aion-1.0 | 1 | 0.0% | 0.0% | 1 (100.0%) | 0.0% | 0 (0.0%) | 0.0% |
+| deepseek/deepseek-r1-distill-qwen-1.5b | 1 | 0.0% | 0.0% | 1 (100.0%) | 0.0% | 0 (0.0%) | 0.0% |
+| anthropic/claude-2.0 | 1 | 0.0% | 0.0% | 1 (100.0%) | 0.0% | 0 (0.0%) | 0.0% |
+| cohere/command-r-03-2024 | 1 | 0.0% | 100.0% | 1 (100.0%) | 0.0% | 0 (0.0%) | 0.0% |
+| qwen/qwen-2-72b-instruct | 1 | 0.0% | 100.0% | 1 (100.0%) | 0.0% | 0 (0.0%) | 0.0% |
+| microsoft/phi-3-mini-128k-instruct | 1 | 0.0% | 0.0% | 1 (100.0%) | 0.0% | 0 (0.0%) | 0.0% |
+
+## Game Summary
+
+- **Total matches analyzed**: 2
+- **Total players**: 19
+- **Werewolves**: 6 (31.6%)
+- **Villagers**: 13 (68.4%)
+- **Werewolf team wins**: 2 (100.0%)
+- **Villager team wins**: 0 (0.0%)
+
 <!-- end stats -->
-
-## Project Structure
-
-- `werewolf.ts` - Main game engine
-- `llms.txt` - List of LLM models to use as players
-- `names.txt` - List of player names
-- `matches/` - Directory containing game transcripts
-- `eval.ts` - Script to analyze game statistics
-- `stats/` - Directory containing generated statistics
-
-## Requirements
-
-- [Bun](https://bun.sh/) runtime
-- OpenRouter API key for accessing multiple LLM models
