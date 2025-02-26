@@ -47,6 +47,11 @@ interface Player {
   is_alive: boolean;
 }
 
+interface PlayerFilterOptions {
+  isAlive?: boolean;
+  character?: Character;
+}
+
 interface ModelStats {
   total_games: number;
   total_wins: number;
@@ -198,34 +203,40 @@ class Game {
    * @param numWerewolves - The number of werewolves, if a number between 0 and 1, percentage of the total players, otherwise absolute number
    * @param numNightDiscussionRounds - The number of night discussion rounds
    * @param numDayDiscussionRounds - The number of day discussion rounds
+   * @param availableLlms - Map of model names to completion functions
+   * @param maxPlayersPerGame - Maximum number of players per game, defaults to all available LLMs
    */
   constructor(
     private matchIdx: number,
     private numWerewolves: number,
     private numNightDiscussionRounds: number,
-    private numDayDiscussionRounds: number
+    private numDayDiscussionRounds: number,
+    private availableLlms: Record<string, CompletionFunction>,
+    private maxPlayersPerGame?: number
   ) {
     this.chat = [];
 
     const modelKeys = Object.keys(availableLlms);
-    const usedNames = shuffle(NAME_LIST).slice(0, modelKeys.length);
+    const playerCount = this.maxPlayersPerGame ? Math.min(this.maxPlayersPerGame, modelKeys.length) : modelKeys.length;
+    const usedModels = shuffle(modelKeys).slice(0, playerCount);
+    const usedNames = shuffle(NAME_LIST).slice(0, playerCount);
 
     this.numWerewolves = this.numWerewolves < 1
       ? Math.floor(this.numWerewolves * usedNames.length)
       : this.numWerewolves as number;
 
-    this.players = {};
-    for (let i = 0; i < usedNames.length; i++) {
-      this.players[usedNames[i]] = {
-        model: modelKeys[i],
+    this.players = usedNames.reduce((players, name, i) => {
+      players[name] = {
+        model: usedModels[i],
         character: undefined,
         is_alive: true
       };
-    }
+      return players;
+    }, {} as Record<string, Player>);
   }
 
   getWinnerStats(winnerTeam: Character): Winner {
-    const winners = this.getPlayersByState({ isWerewolf: winnerTeam === Character.WEREWOLF });
+    const winners = this.getPlayersByState({ character: winnerTeam });
     return {
       winning_team: winnerTeam,
       winners: Object.entries(winners).map(([name, player]) => ({
@@ -288,7 +299,7 @@ class Game {
 
     const model = this.players[playerName].model;
     try {
-      let content = await availableLlms[model](formattedMessages);
+      let content = await this.availableLlms[model](formattedMessages);
 
       // Remove player name prefixes
       for (const name of Object.keys(this.players)) {
@@ -369,8 +380,9 @@ class Game {
     return maxCandidate;
   }
 
-  getPlayersByState({ isAlive, isWerewolf }: { isAlive?: boolean; isWerewolf?: boolean } = {}): Record<string, Player> {
+  getPlayersByState(options: PlayerFilterOptions = {}): Record<string, Player> {
     const result: Record<string, Player> = {};
+    const { isAlive, character } = options;
 
     for (const [name, player] of Object.entries(this.players)) {
       let include = true;
@@ -379,7 +391,7 @@ class Game {
         include = false;
       }
 
-      if (isWerewolf !== undefined && (player.character === Character.WEREWOLF) !== isWerewolf) {
+      if (character !== undefined && player.character !== character) {
         include = false;
       }
 
@@ -391,13 +403,13 @@ class Game {
     return result;
   }
 
-  getPlayerNames(options: { isAlive?: boolean; isWerewolf?: boolean } = {}): string[] {
+  getPlayerNames(options: PlayerFilterOptions = {}): string[] {
     return Object.keys(this.getPlayersByState(options));
   }
 
   checkGameOver(): { gameOver: boolean, winner?: Character } {
-    const aliveWerewolves = Object.keys(this.getPlayersByState({ isAlive: true, isWerewolf: true })).length;
-    const aliveVillagers = Object.keys(this.getPlayersByState({ isAlive: true, isWerewolf: false })).length;
+    const aliveWerewolves = Object.keys(this.getPlayersByState({ isAlive: true, character: Character.WEREWOLF })).length;
+    const aliveVillagers = Object.keys(this.getPlayersByState({ isAlive: true, character: Character.VILLAGER })).length;
 
     if (aliveWerewolves === 0) {
       return { gameOver: true, winner: Character.VILLAGER };
@@ -481,7 +493,7 @@ Remember: You are a player, not the moderator.`;
       let message = `${playerName}, you are a ${player.character}.`;
 
       if (player.character === Character.WEREWOLF) {
-        const otherWerewolves = this.getPlayerNames({ isWerewolf: true }).filter(n => n !== playerName);
+        const otherWerewolves = this.getPlayerNames({ character: Character.WEREWOLF }).filter(n => n !== playerName);
         message += ` Your fellow Werewolves are: ${otherWerewolves.join(', ')}. The other players are Villagers.`;
       }
 
@@ -496,7 +508,7 @@ Remember: You are a player, not the moderator.`;
       if (gameOver) break;
 
       // Night phase
-      const werewolves = this.getPlayerNames({ isAlive: true, isWerewolf: true });
+      const werewolves = this.getPlayerNames({ isAlive: true, character: Character.WEREWOLF });
       this.appendMessage(
         Character.MODERATOR,
         allPlayers,
@@ -565,7 +577,7 @@ Remember: You are a player, not the moderator.`;
       }
     }
 
-    const werewolfNames = this.getPlayerNames({ isWerewolf: true });
+    const werewolfNames = this.getPlayerNames({ character: Character.WEREWOLF });
     this.appendMessage(
       Character.MODERATOR,
       allPlayers,
@@ -582,14 +594,16 @@ async function play({
   matchIdx,
   numWerewolves,
   numNightDiscussionRounds,
-  numDayDiscussionRounds
+  numDayDiscussionRounds,
+  maxPlayersPerGame
 }: {
   matchIdx: number;
   numWerewolves: number;
   numNightDiscussionRounds: number;
   numDayDiscussionRounds: number;
+    maxPlayersPerGame?: number;
 }): Promise<void> {
-  const game = new Game(matchIdx, numWerewolves, numNightDiscussionRounds, numDayDiscussionRounds);
+  const game = new Game(matchIdx, numWerewolves, numNightDiscussionRounds, numDayDiscussionRounds, availableLlms, maxPlayersPerGame);
   await game.play();
 }
 
@@ -598,7 +612,8 @@ async function main(): Promise<void> {
     numMatches: 2,
     numWerewolves: 1 / 3,
     numNightDiscussionRounds: 2,
-    numDayDiscussionRounds: 2
+    numDayDiscussionRounds: 2,
+    maxPlayersPerGame: undefined // Set to a number to limit players, undefined uses all available LLMs
   };
 
   for (let i = 0; i < gameStartStats.numMatches; i++) {
