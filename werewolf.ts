@@ -9,6 +9,7 @@ import fs from 'fs';
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/index.mjs';
 import z from 'zod';
+import shuffle from 'lodash/shuffle';
 
 // Load environment variables
 const env = z.object({
@@ -314,7 +315,7 @@ class Game {
     this.chat = [];
 
     const modelKeys = Object.keys(availableLlms);
-    const usedNames = this.shuffle(NAME_LIST).slice(0, modelKeys.length * playersPerModel);
+    const usedNames = shuffle(NAME_LIST).slice(0, modelKeys.length * playersPerModel);
     const models = Array(playersPerModel).fill(modelKeys).flat();
 
     this.numWerewolves = numWerewolves < 1
@@ -334,15 +335,6 @@ class Game {
         is_alive: true
       };
     }
-  }
-
-  shuffle<T>(array: T[]): T[] {
-    const newArray = [...array];
-    for (let i = newArray.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
-    }
-    return newArray;
   }
 
   getWinnerStats(winnerTeam: string): Winner {
@@ -436,7 +428,7 @@ class Game {
     }
 
     const majorityThreshold = Math.floor(aliveVoters.length / 2) + 1;
-    const shuffledVoters = this.shuffle(aliveVoters);
+    const shuffledVoters = shuffle(aliveVoters);
 
     for (const voter of shuffledVoters) {
       this.appendMessage(
@@ -450,7 +442,7 @@ class Game {
 
       this.appendMessage(voter, visibleTo, response);
 
-      const shuffledCandidates = this.shuffle(Object.keys(this.players));
+      const shuffledCandidates = shuffle(Object.keys(this.players));
       for (const candidate of shuffledCandidates) {
         if (response.includes(candidate)) {
           if (!aliveCandidates.includes(candidate)) {
@@ -572,7 +564,7 @@ Remember: You are a player, not the moderator.`;
     this.appendMessage(Role.MODERATOR, allPlayers, welcomeMsg);
 
     // Get introductions
-    for (const player of this.shuffle(allPlayers)) {
+    for (const player of shuffle(allPlayers)) {
       this.appendMessage(
         Role.MODERATOR,
         [player],
@@ -585,7 +577,7 @@ Remember: You are a player, not the moderator.`;
 
     // Assign roles
     const playerEntries = Object.entries(this.players);
-    this.shuffle(playerEntries);
+    shuffle(playerEntries);
 
     for (let i = 0; i < playerEntries.length; i++) {
       const [playerName, player] = playerEntries[i];
@@ -626,7 +618,7 @@ Remember: You are a player, not the moderator.`;
       );
 
       for (let round = 0; round < this.numRounds.night; round++) {
-        for (const werewolf of this.shuffle(werewolves)) {
+        for (const werewolf of shuffle(werewolves)) {
           const response = await this.letPlayerTalk(werewolf);
           this.appendMessage(werewolf, werewolves, response);
         }
@@ -660,7 +652,7 @@ Remember: You are a player, not the moderator.`;
       );
 
       for (let round = 0; round < this.numRounds.day; round++) {
-        for (const player of this.shuffle(alivePlayers)) {
+        for (const player of shuffle(alivePlayers)) {
           const response = await this.letPlayerTalk(player);
           if (response) {
             this.appendMessage(player, alivePlayers, response);
