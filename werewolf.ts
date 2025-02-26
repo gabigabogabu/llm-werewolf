@@ -115,7 +115,11 @@ function printMessage(message: Message, players: Record<string, Player>): void {
   const author = message.author;
 
   if (author === Character.MODERATOR) {
-    console.log(`Moderator: ${content}`);
+    if (message.visible_to.length === 1 && Object.keys(players).length > 1) {
+      console.log(`Moderator (to ${message.visible_to[0]}): ${content}`);
+    } else {
+      console.log(`Moderator: ${content}`);
+    }
   } else {
     console.log(`${author} (${message.character}) (${players[author].model}): ${content}`);
   }
@@ -609,11 +613,12 @@ async function play({
 
 async function main(): Promise<void> {
   const gameStartStats = {
+    numLlms: Object.keys(availableLlms).length,
     numMatches: 2,
     numWerewolves: 1 / 3,
     numNightDiscussionRounds: 2,
     numDayDiscussionRounds: 2,
-    maxPlayersPerGame: undefined // Set to a number to limit players, undefined uses all available LLMs
+    maxPlayersPerGame: 10
   };
 
   for (let i = 0; i < gameStartStats.numMatches; i++) {
