@@ -1,0 +1,17 @@
+{
+  "name": "llm-werewolf",
+  "module": "werewolf.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.37.0",
+    "@mistralai/mistralai": "^1.5.0",
+    "openai": "^4.85.4",
+    "zod": "^3.24.2"
+  }
+}
